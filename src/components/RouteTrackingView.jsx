@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Map, { Marker } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import Pusher from 'pusher-js';
+import echo from '../utils/echo';
 
 // Reemplaza con tu token real de Mapbox si usas react-map-gl con Mapbox
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiZGVtbyIsImEiOiJjbGo3dHRpY28waDNnM2xzNm1ya2M2YnhxIn0.demo';
@@ -16,21 +16,13 @@ export default function RouteTrackingView() {
   // Estado mock para la parada activa
   const [isCheckInCompleted, setIsCheckInCompleted] = useState(false);
 
-  // Fase 3: Integración WebSockets
+  // Fase 3: Integración WebSockets mediante Laravel Echo
   useEffect(() => {
-    // Configuración estricta para entorno local Docker/Reverb
-    const pusher = new Pusher('cashcontrol_local_key', {
-      cluster: 'mt1',
-      wsHost: '127.0.0.1',
-      wsPort: 8080,
-      wssPort: 8080,
-      forceTLS: false,
-      disableStats: true,
-      enabledTransports: ['ws', 'wss'],
-    });
+    // Suscripción al canal privado usando la instancia de Echo
+    const channel = echo.private('routes.1');
 
-    const channel = pusher.subscribe('private-routes.1');
-    channel.bind('VehicleLocationUpdated', (data) => {
+    // Escuchar el evento de actualización de ubicación del vehículo
+    channel.listen('.App\\Events\\RouteTracking\\VehicleLocationUpdated', (data) => {
       if (data && data.latitude && data.longitude) {
         setVehiclePosition({
           latitude: data.latitude,
@@ -39,14 +31,14 @@ export default function RouteTrackingView() {
       }
     });
 
-    channel.bind('RouteSignalLost', () => {
+    // Escuchar la pérdida de señal (opcional, acorde a tu backend)
+    channel.listen('.App\\Events\\RouteTracking\\RouteSignalLost', () => {
       console.warn('Señal de ruta perdida');
     });
 
+    // Cleanup: abandonar el canal
     return () => {
-      channel.unbind_all();
-      channel.unsubscribe();
-      pusher.disconnect();
+      echo.leave('routes.1');
     };
   }, []);
 
