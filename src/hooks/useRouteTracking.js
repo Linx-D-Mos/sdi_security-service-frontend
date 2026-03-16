@@ -6,7 +6,7 @@ export default function useRouteTracking(routeId) {
     longitude: -74.0817,
     latitude: 4.6897,
   });
-
+  const [incidentTypes, setIncidentTypes] = useState([]);
   const [routeData, setRouteData] = useState(null);
   const [routeStops, setRouteStops] = useState([]);
   const [routeInfo, setRouteInfo] = useState({
@@ -60,6 +60,25 @@ export default function useRouteTracking(routeId) {
             (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0)
           );
           setRouteStops(sortedStops);
+
+          const lastLocation = route.attributes?.last_known_location;
+
+          if (lastLocation && lastLocation.lat && lastLocation.lng) {
+            setVehiclePosition({
+              latitude: lastLocation.lat,
+              longitude: lastLocation.lng
+            });
+          }
+          // 2. Fallback: Si no hay tracking previo, ubicamos el camión en la primera parada
+          else if (sortedStops.length > 0) {
+            const firstStopLocation = sortedStops[0].relationships?.store?.attributes?.location?.coordinates;
+            if (firstStopLocation) {
+              setVehiclePosition({
+                latitude: firstStopLocation[1], // Recuerda: PostGIS es [Lng, Lat]
+                longitude: firstStopLocation[0]
+              });
+            }
+          }
         }
       } catch (error) {
         console.error('Error fetching route data:', error);
@@ -128,6 +147,84 @@ export default function useRouteTracking(routeId) {
       console.error("Error en Check-in:", error);
     }
   };
+  useEffect(() => {
+    const initData = async () => {
+      setIsLoading(true);
+      try {
+        const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
 
-  return { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn };
+        // Carga paralela de Ruta y Tipos de Incidentes
+        const [routeRes, typesRes] = await Promise.all([
+          fetch(`http://localhost/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
+          fetch(`http://localhost/api/v1/incident-types`, { headers })
+        ]);
+
+        const routeJson = await routeRes.json();
+        const typesJson = await typesRes.json();
+
+        // Procesar Ruta
+        const route = routeJson.data;
+        if (route) {
+          setRouteStops(route.relationships?.route_stops || []);
+          // ... lógica de posicion inicial que ya teníamos ...
+        }
+
+        // Procesar Tipos de Incidentes (Mapeo de códigos a IDs)
+        setIncidentTypes(typesJson.data || []);
+
+      } catch (error) {
+        console.error('Error inicializando tracking:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    initData();
+  }, [routeId]);
+
+  // ... lógica de websockets igual ...
+
+  // 2. NUEVA FUNCIÓN: Reportar Incidente
+  const handleReportIncident = async (stopId, typeCode) => {
+    // Buscar el ID del incidente según el código enviado (ej: 'CLOSE_STORE')
+    const type = incidentTypes.find(t => t.attributes.code === typeCode);
+
+    if (!type) {
+      console.error(`Tipo de incidente ${typeCode} no encontrado en el sistema.`);
+      return;
+    }
+
+    // Para el Sandbox, pedimos una descripción rápida
+    const description = window.prompt(`Reportar incidente: ${type.attributes.display_name}. Ingrese descripción:`, "Punto de venta inaccesible.");
+
+    if (description === null) return; // Cancelado por usuario
+
+    try {
+      const response = await fetch(`http://localhost/api/v1/routes/${routeId}/incidents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-User-Id': '1'
+        },
+        body: JSON.stringify({
+          route_stop_id: stopId,
+          route_incident_type_id: type.id,
+          description: description,
+          // evidences: [] // Por ahora opcional en el sandbox si el type no lo exige
+        })
+      });
+
+      if (response.ok) {
+        alert("Incidente reportado exitosamente. La central ha sido notificada.");
+        // Aquí podrías recargar los datos para ver la parada como 'FAILED'
+      } else {
+        const err = await response.json();
+        alert(`Error: ${err.message || 'No se pudo reportar'}`);
+      }
+    } catch (error) {
+      console.error("Error en reporte:", error);
+    }
+  };
+
+  return { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident };
 }

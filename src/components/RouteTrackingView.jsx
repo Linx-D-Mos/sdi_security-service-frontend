@@ -9,7 +9,7 @@ import RouteTimeline from './RouteTimeline';
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiZGVtbyIsImEiOiJjbGo3dHRpY28waDNnM2xzNm1ya2M2YnhxIn0.demo';
 
 export default function RouteTrackingView() {
-  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn } = useRouteTracking(1);
+  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident } = useRouteTracking(1);
 
   // 1. ESTADO DE LA VISTA DEL MAPA
   const [viewState, setViewState] = useState({
@@ -149,6 +149,7 @@ export default function RouteTrackingView() {
             stops={routeStops}
             isLoading={isLoading}
             onCheckIn={handleCheckIn}
+            onReportIncident={handleReportIncident}
           />
         </div>
       </section>
