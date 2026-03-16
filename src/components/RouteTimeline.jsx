@@ -1,6 +1,6 @@
 import StopItem from './StopItem';
 
-export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportIncident }) {
+export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportIncident, distanceToTarget, isWithinGeofence, onCheckOut }) {
   if (isLoading) {
     return (
       <div className="flex-1 px-6 py-6 text-center text-slate-500">
@@ -25,6 +25,7 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
 
         // Verificamos el estado para saber si mostramos el botón
         const isPending = state?.code === 'pending';
+        const isInProgress = state?.code === 'in_progress';
         const isFailed = state?.code === 'failed';
         const isCompleted = state?.code === 'completed';
 
@@ -59,13 +60,23 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
                 <div className="mt-3 flex flex-col gap-2">
                   <button
                     onClick={() => onCheckIn(stop.id)}
-                    className="mt-3 w-full bg-slate-900 hover:bg-blue-600 text-white font-semibold py-2.5 px-4 rounded-lg transition-all text-sm flex justify-center items-center shadow-md active:scale-95"
+                    disabled={!isWithinGeofence}
+                    className={`mt-3 w-full font-semibold py-3 px-4 rounded-lg transition-all text-sm flex justify-center items-center shadow-md ${isWithinGeofence
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95 cursor-pointer animate-pulse'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                      }`}
                   >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {isWithinGeofence ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      )}
                     </svg>
-                    Hacer Check-in
+                    {isWithinGeofence
+                      ? 'Confirmar Llegada'
+                      : `Fuera del área (${distanceToTarget !== null ? distanceToTarget + 'm' : 'Calculando...'})`
+                    }
                   </button>
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -81,6 +92,31 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
                       Sin Cuadre
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* ACCIONES DURANTE LA PARADA (IN_PROGRESS) */}
+              {isInProgress && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      const bags = prompt("¿Cuántas tulas recolectaste?", "1");
+                      // Validamos que ingresó un número y no canceló
+                      if (bags && !isNaN(bags)) {
+                        onCheckOut(stop.id, bags); // <-- LLAMADA AL BACKEND REAL
+                      } else if (bags) {
+                        alert("Por favor ingrese un número válido.");
+                      }
+                    }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all active:scale-95"
+                  >
+                    Finalizar y Check-Out
+                  </button>
+                  <button
+                    onClick={() => onReportIncident(stop.id, 'suspicious_activity')} // O el código de incidente que aplique
+                    className="w-full bg-white text-slate-700 font-semibold py-2 px-4 rounded-lg border-2 border-slate-200 hover:bg-slate-50 transition-all">
+                    Reportar Novedad en Parada
+                  </button>
                 </div>
               )}
             </div>

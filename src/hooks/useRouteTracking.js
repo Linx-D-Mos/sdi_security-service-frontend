@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import echo from '../utils/echo';
+import * as turf from '@turf/turf';
+
 
 export default function useRouteTracking(routeId) {
   const [vehiclePosition, setVehiclePosition] = useState({
@@ -15,81 +17,56 @@ export default function useRouteTracking(routeId) {
     isActive: false,
   });
   const [isLoading, setIsLoading] = useState(true);
-  const mapPoints = routeStops.map(stop => {
-    const store = stop.relationships?.store?.attributes;
-    return {
-      id: stop.id,
-      name: store?.name,
-      // PostGIS/Magellan entrega [lng, lat], asegúrate de mapearlo bien
-      position: {
-        lat: store?.location?.coordinates[1],
-        lng: store?.location?.coordinates[0]
-      },
-      state: stop.relationships?.route_stop_states?.attributes?.code,
-      radius: store?.geofence_radius_meters
-    };
-  });
-  // 1. CARGA INICIAL DE LA API
-  useEffect(() => {
-    const fetchRouteData = async () => {
-      setIsLoading(true);
-      try {
-        const url = `http://localhost/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopCollection&include[]=routeStops.routeStopState&include[]=routeCrews.crewPersonRole`;
-        const response = await fetch(url, {
-          headers: {
-            'Accept': 'application/json',
-            'X-User-Id': '1'
-          }
-        });
+  const fetchRouteData = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
+    try {
+      const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
 
-        const jsonResponse = await response.json();
+      const [routeRes, typesRes] = await Promise.all([
+        fetch(`http://localhost/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
+        fetch(`http://localhost/api/v1/incident-types`, { headers })
+      ]);
 
-        // REGLA DE ORO: En Laravel Resources, la data real está en .data
-        const route = jsonResponse.data;
+      const routeJson = await routeRes.json();
+      const typesJson = await typesRes.json();
 
-        if (route && route.attributes) {
-          setRouteData(route);
-          setRouteInfo(prev => ({
-            ...prev,
-            route_name: route.attributes.route_name || `Ruta #${routeId}`
-          }));
+      const route = routeJson.data;
+      if (route) {
+        setRouteData(route);
+        setRouteInfo(prev => ({
+          ...prev,
+          route_name: route.attributes.route_name || `Ruta #${routeId}`
+        }));
 
-          // Mapeo y ordenamiento de paradas
-          const stops = route.relationships?.route_stops || [];
-          const sortedStops = [...stops].sort((a, b) =>
-            (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0)
-          );
-          setRouteStops(sortedStops);
+        const stops = route.relationships?.route_stops || [];
+        const sortedStops = [...stops].sort((a, b) => (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0));
+        setRouteStops(sortedStops);
 
+        // Actualización de posición inicial solo si no tenemos una
+        if (showLoading) {
           const lastLocation = route.attributes?.last_known_location;
-
-          if (lastLocation && lastLocation.lat && lastLocation.lng) {
-            setVehiclePosition({
-              latitude: lastLocation.lat,
-              longitude: lastLocation.lng
-            });
-          }
-          // 2. Fallback: Si no hay tracking previo, ubicamos el camión en la primera parada
-          else if (sortedStops.length > 0) {
-            const firstStopLocation = sortedStops[0].relationships?.store?.attributes?.location?.coordinates;
-            if (firstStopLocation) {
-              setVehiclePosition({
-                latitude: firstStopLocation[1], // Recuerda: PostGIS es [Lng, Lat]
-                longitude: firstStopLocation[0]
-              });
+          if (lastLocation?.lat && lastLocation?.lng) {
+            setVehiclePosition({ latitude: lastLocation.lat, longitude: lastLocation.lng });
+          } else if (sortedStops.length > 0) {
+            const firstLocation = sortedStops[0].relationships?.store?.attributes?.location?.coordinates;
+            if (firstLocation) {
+              setVehiclePosition({ latitude: firstLocation[1], longitude: firstLocation[0] });
             }
           }
         }
-      } catch (error) {
-        console.error('Error fetching route data:', error);
-      } finally {
-        setIsLoading(false);
       }
-    };
-
-    fetchRouteData();
+      setIncidentTypes(typesJson.data || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      if (showLoading) setIsLoading(false);
+    }
   }, [routeId]);
 
+  // 2. EL USE EFFECT AHORA SOLO LLAMA A LA FUNCIÓN
+  useEffect(() => {
+    fetchRouteData(true);
+  }, [fetchRouteData]);
   // 2. SUBSCRIPCIÓN A WEBSOCKETS
   useEffect(() => {
     const channelName = `routes.${routeId}`;
@@ -124,6 +101,7 @@ export default function useRouteTracking(routeId) {
     };
   }, [routeId, routeData]); // Se re-suscribe si routeData cambia para tener el nombre actualizado
 
+  // 3. ACTUALIZAMOS HANDLE CHECK-IN PARA QUE REFRESQUE LA UI
   const handleCheckIn = async (stopId) => {
     try {
       const response = await fetch(`http://localhost/api/v1/route-stops/${stopId}/check-in`, {
@@ -131,7 +109,7 @@ export default function useRouteTracking(routeId) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-User-Id': '1' // Temporal, luego vía Auth
+          'X-User-Id': '1'
         },
         body: JSON.stringify({
           latitude: vehiclePosition.latitude,
@@ -140,49 +118,46 @@ export default function useRouteTracking(routeId) {
       });
 
       if (response.ok) {
-        // Refrescar datos o actualizar estado local
         console.log("Check-in exitoso");
+        // ¡LA MAGIA! Refrescamos los datos en silencio (sin pantalla de carga completa)
+        await fetchRouteData(false);
+      } else {
+        const err = await response.json();
+        alert(`Error en Check-in: ${err.message || 'Fuera de rango'}`);
       }
     } catch (error) {
       console.error("Error en Check-in:", error);
     }
   };
-  useEffect(() => {
-    const initData = async () => {
-      setIsLoading(true);
-      try {
-        const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
 
-        // Carga paralela de Ruta y Tipos de Incidentes
-        const [routeRes, typesRes] = await Promise.all([
-          fetch(`http://localhost/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
-          fetch(`http://localhost/api/v1/incident-types`, { headers })
-        ]);
+  // 4. NUEVA FUNCIÓN: HANDLE CHECK-OUT
+  const handleCheckOut = async (stopId, bagsAmount) => {
+    try {
+      const response = await fetch(`http://localhost/api/v1/route-stops/${stopId}/check-out`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-User-Id': '1'
+        },
+        body: JSON.stringify({
+          bags_amount: parseInt(bagsAmount, 10)
+        })
+      });
 
-        const routeJson = await routeRes.json();
-        const typesJson = await typesRes.json();
-
-        // Procesar Ruta
-        const route = routeJson.data;
-        if (route) {
-          setRouteStops(route.relationships?.route_stops || []);
-          // ... lógica de posicion inicial que ya teníamos ...
-        }
-
-        // Procesar Tipos de Incidentes (Mapeo de códigos a IDs)
-        setIncidentTypes(typesJson.data || []);
-
-      } catch (error) {
-        console.error('Error inicializando tracking:', error);
-      } finally {
-        setIsLoading(false);
+      if (response.ok) {
+        console.log("Check-out exitoso");
+        alert(`Check-out exitoso. Se recolectaron ${bagsAmount} tulas.`);
+        // ¡LA MAGIA OTRA VEZ! Refrescamos la ruta para que pase a "Completed" (Verde)
+        await fetchRouteData(false);
+      } else {
+        const err = await response.json();
+        alert(`Error en Check-out: ${err.message}`);
       }
-    };
-    initData();
-  }, [routeId]);
-
-  // ... lógica de websockets igual ...
-
+    } catch (error) {
+      console.error("Error en Check-out:", error);
+    }
+  };
   // 2. NUEVA FUNCIÓN: Reportar Incidente
   const handleReportIncident = async (stopId, typeCode) => {
     // Buscar el ID del incidente según el código enviado (ej: 'CLOSE_STORE')
@@ -226,5 +201,40 @@ export default function useRouteTracking(routeId) {
     }
   };
 
-  return { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident };
+  // Mapeo limpio para el mapa
+  const mapPoints = useMemo(() => {
+    return routeStops.map(stop => {
+      const store = stop.relationships?.store?.attributes;
+      return {
+        id: stop.id,
+        name: store?.name,
+        position: store?.location?.coordinates ? {
+          lat: store.location.coordinates[1],
+          lng: store.location.coordinates[0]
+        } : null,
+        state: stop.relationships?.route_stop_states?.attributes?.code,
+        radius: store?.geofence_radius_meters || 50 // Default a 50m si es null
+      };
+    });
+  }, [routeStops]);
+  const activeStop = mapPoints.find(p => p.state === 'pending');
+
+  // Calcular distancia en tiempo real al objetivo
+  let distanceToTarget = null;
+  let isWithinGeofence = false;
+
+  if (activeStop && activeStop.position && vehiclePosition.longitude) {
+    const from = turf.point([vehiclePosition.longitude, vehiclePosition.latitude]);
+    const to = turf.point([activeStop.position.lng, activeStop.position.lat]);
+
+    // Turf nos da la distancia en metros
+    distanceToTarget = Math.round(turf.distance(from, to, { units: 'meters' }));
+    isWithinGeofence = distanceToTarget <= activeStop.radius;
+  }
+
+  return {
+    vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident, handleCheckOut, activeStop,
+    distanceToTarget,
+    isWithinGeofence
+  };
 }

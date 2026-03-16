@@ -5,11 +5,14 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import useRouteTracking from '../hooks/useRouteTracking';
 import RouteHeader from './RouteHeader';
 import RouteTimeline from './RouteTimeline';
+import { Source, Layer } from 'react-map-gl/maplibre';
+import * as turf from '@turf/turf';
+import { useMemo } from 'react';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiZGVtbyIsImEiOiJjbGo3dHRpY28waDNnM2xzNm1ya2M2YnhxIn0.demo';
 
 export default function RouteTrackingView() {
-  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident } = useRouteTracking(1);
+  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, distanceToTarget, isWithinGeofence } = useRouteTracking(1);
 
   // 1. ESTADO DE LA VISTA DEL MAPA
   const [viewState, setViewState] = useState({
@@ -32,6 +35,44 @@ export default function RouteTrackingView() {
       }));
     }
   }, [vehiclePosition, isUserInteracting]);
+
+  const geofencesLayer = useMemo(() => {
+    if (!mapPoints) return null;
+    const pendingPoints = mapPoints.filter(p => p.state === 'pending' && p.position);
+    if (pendingPoints.length === 0) return null;
+
+    // Creamos un GeoJSON FeatureCollection con los círculos
+    const features = pendingPoints.map(p =>
+      // Turf.circle espera el radio en kilómetros
+      turf.circle([p.position.lng, p.position.lat], p.radius / 1000, { units: 'kilometers' })
+    );
+
+    const geoJsonData = turf.featureCollection(features);
+
+    return (
+      <Source id="geofences" type="geojson" data={geoJsonData}>
+        {/* Relleno translúcido */}
+        <Layer
+          id="geofence-fill"
+          type="fill"
+          paint={{
+            'fill-color': '#3b82f6', // Azul Tailwind
+            'fill-opacity': 0.15
+          }}
+        />
+        {/* Borde del círculo */}
+        <Layer
+          id="geofence-line"
+          type="line"
+          paint={{
+            'line-color': '#2563eb', // Azul oscuro
+            'line-width': 2,
+            'line-dasharray': [2, 2] // Línea punteada
+          }}
+        />
+      </Source>
+    );
+  }, [mapPoints]);
 
   if (isLoading && !routeInfo.route_name) {
     return (
@@ -103,6 +144,7 @@ export default function RouteTrackingView() {
               </div>
             </div>
           </Marker>
+          {geofencesLayer}
         </Map>
 
         {/* BOTÓN PARA RE-CENTRAR (Solo aparece si el usuario movió el mapa) */}
@@ -149,7 +191,10 @@ export default function RouteTrackingView() {
             stops={routeStops}
             isLoading={isLoading}
             onCheckIn={handleCheckIn}
+            onCheckOut={handleCheckOut}
             onReportIncident={handleReportIncident}
+            distanceToTarget={distanceToTarget} // NUEVO
+            isWithinGeofence={isWithinGeofence}
           />
         </div>
       </section>
