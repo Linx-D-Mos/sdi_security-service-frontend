@@ -1,6 +1,6 @@
 import StopItem from './StopItem';
 
-export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportIncident, distanceToTarget, isWithinGeofence, onCheckOut }) {
+export default function RouteTimeline({ stops, mapPoints, activeStop, isLoading, onCheckIn, onReportIncident, onCheckOut }) {
   if (isLoading) {
     return (
       <div className="flex-1 px-6 py-6 text-center text-slate-500">
@@ -29,6 +29,12 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
         const isFailed = state?.code === 'failed';
         const isCompleted = state?.code === 'completed';
 
+        // Extraemos los cálculos de distancia y turno de este punto en específico
+        const pointData = mapPoints?.find(p => p.id === stop.id);
+        const distanceToTarget = pointData?.distanceToTarget;
+        const isWithinGeofence = pointData?.isWithinGeofence;
+        const isNextToVisit = activeStop?.id === stop.id;
+
         return (
           <div key={`timeline-${stop.id}`} className="mb-6 ml-6 relative">
             {/* Indicador visual en la línea de tiempo */}
@@ -44,6 +50,11 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
                     {store?.name || 'Punto de Venta Desconocido'}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{store?.adress}</p>
+                  {store?.location?.coordinates && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      📍 Lng: {store.location.coordinates[0]?.toFixed(5)}, Lat: {store.location.coordinates[1]?.toFixed(5)}
+                    </p>
+                  )}
                 </div>
 
                 {/* Etiqueta de Estado */}
@@ -58,26 +69,35 @@ export default function RouteTimeline({ stops, isLoading, onCheckIn, onReportInc
               {/* EL FAMOSO BOTÓN DE CHECK-IN */}
               {isPending && (
                 <div className="mt-3 flex flex-col gap-2">
-                  <button
-                    onClick={() => onCheckIn(stop.id)}
-                    disabled={!isWithinGeofence}
-                    className={`mt-3 w-full font-semibold py-3 px-4 rounded-lg transition-all text-sm flex justify-center items-center shadow-md ${isWithinGeofence
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95 cursor-pointer animate-pulse'
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
-                      }`}
-                  >
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {isWithinGeofence ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      )}
-                    </svg>
-                    {isWithinGeofence
-                      ? 'Confirmar Llegada'
-                      : `Fuera del área (${distanceToTarget !== null ? distanceToTarget + 'm' : 'Calculando...'})`
-                    }
-                  </button>
+                  {!isNextToVisit ? (
+                    <button
+                      disabled
+                      className="mt-3 w-full font-semibold py-3 px-4 rounded-lg text-sm flex justify-center items-center bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                    >
+                      Esperando turno anterior...
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onCheckIn(stop.id)}
+                      disabled={!isWithinGeofence}
+                      className={`mt-3 w-full font-semibold py-3 px-4 rounded-lg transition-all text-sm flex justify-center items-center shadow-md ${isWithinGeofence
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95 cursor-pointer animate-pulse'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                        }`}
+                    >
+                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        {isWithinGeofence ? (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        ) : (
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        )}
+                      </svg>
+                      {isWithinGeofence
+                        ? 'Confirmar Llegada'
+                        : `Fuera del área (${distanceToTarget !== null ? distanceToTarget + 'm' : 'Calculando...'})`
+                      }
+                    </button>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => onReportIncident(stop.id, 'close_store')}

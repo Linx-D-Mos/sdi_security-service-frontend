@@ -72,7 +72,7 @@ export default function useRouteTracking(routeId) {
     const channelName = `routes.${routeId}`;
     const channel = echo.private(channelName);
 
-    channel.listen('.App\\Events\\RouteTracking\\VehicleLocationUpdated', (eventPayload) => {
+    channel.listen('.vehicle.location.updated', (eventPayload) => {
       // Laravel a veces envía el evento con 'attributes' o directo
       const data = eventPayload.attributes || eventPayload;
 
@@ -92,7 +92,7 @@ export default function useRouteTracking(routeId) {
       }
     });
 
-    channel.listen('.App\\Events\\RouteTracking\\RouteSignalLost', () => {
+    channel.listen('.route.signal.lost', () => {
       setRouteInfo((prev) => ({ ...prev, isActive: false }));
     });
 
@@ -205,36 +205,43 @@ export default function useRouteTracking(routeId) {
   const mapPoints = useMemo(() => {
     return routeStops.map(stop => {
       const store = stop.relationships?.store?.attributes;
+      const stateObj = stop.relationships?.route_stop_state || stop.relationships?.route_stop_states;
+      // Ensure coordinates exist and are stored structurally.
+      // Laravel often returns PostGIS points as [longitude, latitude]
+      const position = store?.location?.coordinates ? {
+        lng: store.location.coordinates[0], // First element is usually Longitude
+        lat: store.location.coordinates[1]  // Second element is Latitude
+      } : null;
+
+      const radius = store?.geofence_radius_meters || 50; // Default a 50m si es null
+
+      let distanceToTarget = null;
+      let isWithinGeofence = false;
+
+      if (position && vehiclePosition.longitude && vehiclePosition.latitude) {
+        // Turf uses [longitude, latitude] format
+        const from = turf.point([vehiclePosition.longitude, vehiclePosition.latitude]);
+        const to = turf.point([position.lng, position.lat]);
+
+        // Turf nos da la distancia en metros
+        distanceToTarget = Math.round(turf.distance(from, to, { units: 'meters' }));
+        isWithinGeofence = distanceToTarget <= radius;
+      }
+
       return {
         id: stop.id,
         name: store?.name,
-        position: store?.location?.coordinates ? {
-          lat: store.location.coordinates[1],
-          lng: store.location.coordinates[0]
-        } : null,
-        state: stop.relationships?.route_stop_states?.attributes?.code,
-        radius: store?.geofence_radius_meters || 50 // Default a 50m si es null
+        position,
+        state: stateObj?.attributes?.code?.toLowerCase() || 'pending',
+        radius,
+        distanceToTarget,
+        isWithinGeofence
       };
     });
-  }, [routeStops]);
+  }, [routeStops, vehiclePosition.longitude, vehiclePosition.latitude]);
   const activeStop = mapPoints.find(p => p.state === 'pending');
 
-  // Calcular distancia en tiempo real al objetivo
-  let distanceToTarget = null;
-  let isWithinGeofence = false;
-
-  if (activeStop && activeStop.position && vehiclePosition.longitude) {
-    const from = turf.point([vehiclePosition.longitude, vehiclePosition.latitude]);
-    const to = turf.point([activeStop.position.lng, activeStop.position.lat]);
-
-    // Turf nos da la distancia en metros
-    distanceToTarget = Math.round(turf.distance(from, to, { units: 'meters' }));
-    isWithinGeofence = distanceToTarget <= activeStop.radius;
-  }
-
   return {
-    vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident, handleCheckOut, activeStop,
-    distanceToTarget,
-    isWithinGeofence
+    vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident, handleCheckOut, activeStop
   };
 }

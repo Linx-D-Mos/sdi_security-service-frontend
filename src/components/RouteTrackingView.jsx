@@ -12,7 +12,7 @@ import { useMemo } from 'react';
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiZGVtbyIsImEiOiJjbGo3dHRpY28waDNnM2xzNm1ya2M2YnhxIn0.demo';
 
 export default function RouteTrackingView() {
-  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, distanceToTarget, isWithinGeofence } = useRouteTracking(1);
+  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, activeStop } = useRouteTracking(1);
 
   // 1. ESTADO DE LA VISTA DEL MAPA
   const [viewState, setViewState] = useState({
@@ -36,42 +36,40 @@ export default function RouteTrackingView() {
     }
   }, [vehiclePosition, isUserInteracting]);
 
-  const geofencesLayer = useMemo(() => {
-    if (!mapPoints) return null;
-    const pendingPoints = mapPoints.filter(p => p.state === 'pending' && p.position);
-    if (pendingPoints.length === 0) return null;
+  // ==========================================
+  // GENERADOR DE GEOCERCAS (PERÍMETROS REALES)
+  // ==========================================
+  const geofencesData = useMemo(() => {
+    const emptyGeoJSON = { type: 'FeatureCollection', features: [] };
+    if (!mapPoints || mapPoints.length === 0) return emptyGeoJSON;
 
-    // Creamos un GeoJSON FeatureCollection con los círculos
-    const features = pendingPoints.map(p =>
-      // Turf.circle espera el radio en kilómetros
-      turf.circle([p.position.lng, p.position.lat], p.radius / 1000, { units: 'kilometers' })
-    );
+    // Filtramos los puntos que sí tienen coordenadas
+    const validPoints = mapPoints.filter(p => p.position?.lng && p.position?.lat);
+    if (validPoints.length === 0) return emptyGeoJSON;
 
-    const geoJsonData = turf.featureCollection(features);
+    const features = validPoints.map(point => {
+      // Turf.circle exige el radio en kilómetros. Si tu BD devuelve metros, dividimos por 1000.
+      const radiusInKm = (point.radius || 50) / 1000;
 
-    return (
-      <Source id="geofences" type="geojson" data={geoJsonData}>
-        {/* Relleno translúcido */}
-        <Layer
-          id="geofence-fill"
-          type="fill"
-          paint={{
-            'fill-color': '#3b82f6', // Azul Tailwind
-            'fill-opacity': 0.15
-          }}
-        />
-        {/* Borde del círculo */}
-        <Layer
-          id="geofence-line"
-          type="line"
-          paint={{
-            'line-color': '#2563eb', // Azul oscuro
-            'line-width': 2,
-            'line-dasharray': [2, 2] // Línea punteada
-          }}
-        />
-      </Source>
-    );
+      // Creamos el círculo exacto en la tierra
+      const circle = turf.circle([point.position.lng, point.position.lat], radiusInKm, {
+        units: 'kilometers',
+        steps: 64 // Qué tan redondo queremos el polígono
+      });
+
+      // Le inyectamos las propiedades (estado) para poder colorearlo dinámicamente
+      circle.properties = {
+        id: point.id,
+        state: point.state, // 'pending', 'in_progress', 'completed'
+        name: point.name
+      };
+
+      return circle;
+    });
+
+    const rawFeatureCollection = turf.featureCollection(features);
+    // We stringify and parse the turf output to ensure no reactive proxies or turf getters fail in the Web Worker
+    return JSON.parse(JSON.stringify(rawFeatureCollection));
   }, [mapPoints]);
 
   if (isLoading && !routeInfo.route_name) {
@@ -96,6 +94,42 @@ export default function RouteTrackingView() {
           mapStyle="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
           style={{ width: '100%', height: '100%' }}
         >
+          {/* QUITA EL {geofencesData && (...)} y deja el Source directo */}
+          <Source id="geofences-source" type="geojson" data={geofencesData}>
+            {/* Relleno semi-transparente */}
+            <Layer
+              id="geofences-fill"
+              type="fill"
+              paint={{
+                'fill-color': [
+                  'match',
+                  ['get', 'state'],
+                  'pending', '#3b82f6',      // Azul (Próxima parada)
+                  'in_progress', '#eab308',  // Amarillo (En el sitio)
+                  'completed', '#22c55e',    // Verde (Completada)
+                  '#94a3b8'                  // Gris por defecto
+                ],
+                'fill-opacity': 0.15
+              }}
+            />
+            {/* Borde exterior punteado */}
+            <Layer
+              id="geofences-outline"
+              type="line"
+              paint={{
+                'line-color': [
+                  'match',
+                  ['get', 'state'],
+                  'pending', '#2563eb',
+                  'in_progress', '#ca8a04',
+                  'completed', '#16a34a',
+                  '#64748b'
+                ],
+                'line-width': 2,
+                'line-dasharray': [2, 2]
+              }}
+            />
+          </Source>
           {/* RENDERIZAR PARADAS (Tiendas) en el Mapa */}
           {mapPoints && mapPoints.map(point => {
             if (!point.position?.lng || !point.position?.lat) return null;
@@ -105,7 +139,7 @@ export default function RouteTrackingView() {
                 key={`stop-${point.id}`}
                 longitude={point.position.lng}
                 latitude={point.position.lat}
-                anchor="bottom"
+                anchor="center"
               >
                 <div className="relative flex flex-col items-center group cursor-pointer">
                   {/* Icono de Tienda */}
@@ -115,9 +149,12 @@ export default function RouteTrackingView() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                     </svg>
                   </div>
-                  {/* Tooltip con nombre de la tienda (Aparece al hacer hover) */}
-                  <div className="absolute bottom-full mb-1 hidden group-hover:block bg-slate-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50 shadow-lg">
-                    {point.name}
+                  {/* Tooltip con nombre de la tienda y coordenadas (Aparece al hacer hover) */}
+                  <div className="absolute bottom-full mb-1 flex-col items-center hidden group-hover:flex bg-slate-900 text-white text-[10px] px-2 py-1.5 rounded whitespace-nowrap z-50 shadow-lg">
+                    <span className="font-bold">{point.name}</span>
+                    <span className="text-slate-300 text-[9px] mt-0.5 border-t border-slate-700 pt-0.5">
+                      {point.position.lat.toFixed(5)}, {point.position.lng.toFixed(5)}
+                    </span>
                   </div>
                 </div>
               </Marker>
@@ -144,7 +181,6 @@ export default function RouteTrackingView() {
               </div>
             </div>
           </Marker>
-          {geofencesLayer}
         </Map>
 
         {/* BOTÓN PARA RE-CENTRAR (Solo aparece si el usuario movió el mapa) */}
@@ -189,12 +225,12 @@ export default function RouteTrackingView() {
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           <RouteTimeline
             stops={routeStops}
+            mapPoints={mapPoints}
+            activeStop={activeStop}
             isLoading={isLoading}
             onCheckIn={handleCheckIn}
             onCheckOut={handleCheckOut}
             onReportIncident={handleReportIncident}
-            distanceToTarget={distanceToTarget} // NUEVO
-            isWithinGeofence={isWithinGeofence}
           />
         </div>
       </section>
