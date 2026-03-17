@@ -19,12 +19,11 @@ const echo = new Echo({
     broadcaster: 'reverb',
     key: reverbAppKey,
     wsHost: reverbHost,
-    wsPort: reverbPort,
-    wssPort: reverbPort,
-    forceTLS: isHttps,
-    disableStats: true, 
-    enabledTransports: ['ws', 'wss'],
-    
+    wsPath: import.meta.env.VITE_REVERB_PATH,
+    forceTLS: false,
+    // disableStats: false,
+    enabledTransports: ['ws'],
+
     // Dejar que Echo/Pusher manejen la autorización internamente enviando nuestros headers
     authEndpoint: `${backendApiUrl}/broadcasting/auth`,
     auth: {

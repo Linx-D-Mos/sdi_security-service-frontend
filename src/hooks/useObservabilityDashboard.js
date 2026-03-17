@@ -17,7 +17,7 @@ export default function useObservabilityDashboard() {
     setIsLoading(true);
     try {
       const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
-      const res = await fetch(`http://localhost/api/v1/routes?paginate=true&include[]=routeStops.store&include[]=routeStops.routeStopState&filter[status]=in_progress&include[]=routeIncidents`, { headers });
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/routes?paginate=true&include[]=routeStops.store&include[]=routeStops.routeStopState&filter[status]=in_progress&include[]=routeIncidents`, { headers });
       const json = await res.json();
       const routes = json.data || [];
 
@@ -29,7 +29,7 @@ export default function useObservabilityDashboard() {
         ids.push(route.id);
         const attrs = route.attributes;
         const lastLocation = attrs?.last_known_location;
-        
+
         // Populate initial vehicle positions
         if (lastLocation?.lat && lastLocation?.lng) {
           initialVehicles[route.id] = {
@@ -41,27 +41,27 @@ export default function useObservabilityDashboard() {
             lastUpdated: new Date().toISOString()
           };
         } else {
-            // Try to find the first store's location if no last known location
-            const stops = route.relationships?.route_stops || [];
-            const sortedStops = [...stops].sort((a, b) => (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0));
-            if (sortedStops.length > 0) {
-              const firstLocation = sortedStops[0].relationships?.store?.attributes?.location?.coordinates;
-              if (firstLocation) {
-                 initialVehicles[route.id] = {
-                    routeId: route.id,
-                    routeName: attrs?.route_name || `Ruta #${route.id}`,
-                    latitude: firstLocation[1],
-                    longitude: firstLocation[0],
-                    speed: 0,
-                    lastUpdated: new Date().toISOString()
-                 };
-              }
+          // Try to find the first store's location if no last known location
+          const stops = route.relationships?.route_stops || [];
+          const sortedStops = [...stops].sort((a, b) => (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0));
+          if (sortedStops.length > 0) {
+            const firstLocation = sortedStops[0].relationships?.store?.attributes?.location?.coordinates;
+            if (firstLocation) {
+              initialVehicles[route.id] = {
+                routeId: route.id,
+                routeName: attrs?.route_name || `Ruta #${route.id}`,
+                latitude: firstLocation[1],
+                longitude: firstLocation[0],
+                speed: 0,
+                lastUpdated: new Date().toISOString()
+              };
             }
+          }
         }
 
         // Extract existing incidents from relationships
         if (route.relationships?.route_incidents) {
-           initialIncidents.push(...route.relationships.route_incidents);
+          initialIncidents.push(...route.relationships.route_incidents);
         }
       });
 
@@ -84,7 +84,7 @@ export default function useObservabilityDashboard() {
   // Calculate stats whenever vehicles or incidents change
   useEffect(() => {
     const critical = incidents.filter(i => i.relationships?.incident_type?.severity === 'CRITICAL' || i.relationships?.incident_type?.severity === 'HIGH').length;
-    
+
     setStats({
       totalActive: Object.keys(activeVehicles).length,
       criticalIncidents: critical,
@@ -106,7 +106,7 @@ export default function useObservabilityDashboard() {
       // Listen to vehicle positions
       channel.listen('.vehicle.location.updated', (eventPayload) => {
         const data = eventPayload.attributes || eventPayload;
-        
+
         if (data && data.lat && data.lng) {
           setActiveVehicles(prev => ({
             ...prev,
@@ -129,15 +129,15 @@ export default function useObservabilityDashboard() {
       });
 
       channel.listen('.route.signal.lost', () => {
-         // Mark vehicle as offline or remove it
-         setActiveVehicles(prev => {
-           const copy = { ...prev };
-           if(copy[routeId]) {
-             copy[routeId].speed = 0;
-             copy[routeId].signalLost = true;
-           }
-           return copy;
-         });
+        // Mark vehicle as offline or remove it
+        setActiveVehicles(prev => {
+          const copy = { ...prev };
+          if (copy[routeId]) {
+            copy[routeId].speed = 0;
+            copy[routeId].signalLost = true;
+          }
+          return copy;
+        });
       });
     });
 

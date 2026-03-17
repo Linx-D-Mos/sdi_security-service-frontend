@@ -24,8 +24,8 @@ export default function useRouteTracking(routeId) {
       const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
 
       const [routeRes, typesRes] = await Promise.all([
-        fetch(`http://localhost/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
-        fetch(`http://localhost/api/v1/incident-types`, { headers })
+        fetch(`${import.meta.env.VITE_API_URL}/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
+        fetch(`${import.meta.env.VITE_API_URL}/api/v1/incident-types`, { headers })
       ]);
 
       const routeJson = await routeRes.json();
@@ -122,7 +122,7 @@ export default function useRouteTracking(routeId) {
   // 3. ACTUALIZAMOS HANDLE CHECK-IN PARA QUE REFRESQUE LA UI
   const handleCheckIn = async (stopId) => {
     try {
-      const response = await fetch(`http://localhost/api/v1/route-stops/${stopId}/check-in`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/route-stops/${stopId}/check-in`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -151,7 +151,7 @@ export default function useRouteTracking(routeId) {
   // 4. NUEVA FUNCIÓN: HANDLE CHECK-OUT
   const handleCheckOut = async (stopId, bagsAmount) => {
     try {
-      const response = await fetch(`http://localhost/api/v1/route-stops/${stopId}/check-out`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/route-stops/${stopId}/check-out`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
