@@ -16,6 +16,7 @@ export default function useRouteTracking(routeId) {
     speed: 0,
     isActive: false,
   });
+  const [incidents, setIncidents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const fetchRouteData = useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
@@ -95,7 +96,24 @@ export default function useRouteTracking(routeId) {
     channel.listen('.route.signal.lost', () => {
       setRouteInfo((prev) => ({ ...prev, isActive: false }));
     });
+    channel.listen('.route.incident.reported', (eventPayload) => {
+      const data = eventPayload.attributes || eventPayload;
+      const typeInfo = data.relationships.incident_type;
+      const storeInfo = data.relationships.store;
 
+      const locationMsg = storeInfo ? `la tienda ${storeInfo.name}` : 'la ruta principal';
+
+      // 3. Guardar en el estado para mostrar en el mapa
+      setIncidents(prev => [eventPayload, ...prev]);
+
+      // 4. Lógica de UI según la severidad
+      if (typeInfo.severity === 'CRITICAL') {
+        alert(`🚨 BLOQUEO DE SEGURIDAD 🚨\nCódigo: ${typeInfo.code}\nSe ha reportado: ${typeInfo.name} en ${locationMsg}. \nIniciando protocolo de emergencia.`);
+        // Aquí el frontend bloquearía la ruta visualmente
+      } else {
+        console.warn(`⚠️ Aviso: ${typeInfo.name} reportado en ${locationMsg}.`);
+      }
+    });
     return () => {
       echo.leave(channelName);
     };
@@ -242,6 +260,6 @@ export default function useRouteTracking(routeId) {
   const activeStop = mapPoints.find(p => p.state === 'pending');
 
   return {
-    vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident, handleCheckOut, activeStop
+    vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleReportIncident, handleCheckOut, activeStop, incidents
   };
 }
