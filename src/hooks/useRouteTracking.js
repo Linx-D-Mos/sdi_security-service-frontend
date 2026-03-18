@@ -21,7 +21,7 @@ export default function useRouteTracking(routeId) {
   const fetchRouteData = useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
-      const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
+      const headers = { 'Accept': 'application/json', 'X-User-Id': '2' };
 
       const [routeRes, typesRes] = await Promise.all([
         fetch(`${import.meta.env.VITE_API_URL}/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
@@ -73,14 +73,34 @@ export default function useRouteTracking(routeId) {
     const channelName = `routes.${routeId}`;
     const channel = echo.private(channelName);
 
-    channel.listen('.vehicle.location.updated', (eventPayload) => {
-      // Laravel a veces envía el evento con 'attributes' o directo
-      const data = eventPayload.attributes || eventPayload;
+    // Esperar confirmación de suscripción exitosa
+    channel.subscribed(() => {
+      console.log(`[Echo] Suscrito exitosamente al canal privado: ${channelName}`);
+    }).error((err) => {
+      console.error(`[Echo] Error de suscripción al canal ${channelName}:`, err);
+    });
 
-      if (data && data.lat && data.lng) {
+    // En Laravel 11/Reverb, a veces el punto inicial '.' para ignorar el namespace global falla. 
+    // Escuchamos el evento explícitamente con su namespace.
+    channel.listen('.vehicle.location.updated', (eventPayload) => {
+      console.log(`[WebSocket] payload recibido en .vehicle.location.updated:`, eventPayload);
+
+      // Laravel JSON API resources usually wrap data in 'data' or 'attributes'
+      const data = eventPayload.data?.attributes || eventPayload.attributes || eventPayload.data || eventPayload;
+
+      let lat = data.lat || data.latitude;
+      let lng = data.lng || data.longitude;
+
+      // Soporte para PostGIS Point (GeoJSON format: { type: 'Point', coordinates: [lng, lat] })
+      if (data.coordinate && data.coordinate.coordinates) {
+        lng = data.coordinate.coordinates[0];
+        lat = data.coordinate.coordinates[1];
+      }
+
+      if (lat !== undefined && lng !== undefined) {
         setVehiclePosition({
-          latitude: data.lat,
-          longitude: data.lng,
+          latitude: Number(lat),
+          longitude: Number(lng),
         });
 
         setRouteInfo(prev => ({
@@ -90,13 +110,18 @@ export default function useRouteTracking(routeId) {
           speed: data.speed || 0,
           isActive: true,
         }));
+      } else {
+        console.warn("[WebSocket] No se pudieron extraer coordenadas (lat, lng) del payload:", data);
       }
     });
 
     channel.listen('.route.signal.lost', () => {
+      console.log(`[WebSocket] Señal perdida reportada para la ruta ${routeId}`);
       setRouteInfo((prev) => ({ ...prev, isActive: false }));
     });
+
     channel.listen('.route.incident.reported', (eventPayload) => {
+      console.log(`[WebSocket] Incidente reportado:`, eventPayload);
       const data = eventPayload.attributes || eventPayload;
       const typeInfo = data.relationships.incident_type;
       const storeInfo = data.relationships.store;

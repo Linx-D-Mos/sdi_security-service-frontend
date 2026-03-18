@@ -8,6 +8,7 @@ import RouteMap from './RouteMap';
 import * as turf from '@turf/turf';
 
 export default function RouteTrackingView() {
+  //cambiar el useRouteTracking para cambiar el id de la ruta a visualizar
   const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, activeStop, incidents } = useRouteTracking(1);
 
   // 1. ESTADO DE LA VISTA DEL MAPA

@@ -16,7 +16,7 @@ export default function useObservabilityDashboard() {
   const fetchActiveRoutes = useCallback(async () => {
     setIsLoading(true);
     try {
-      const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
+      const headers = { 'Accept': 'application/json', 'X-User-Id': '2' };
       const res = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/routes?paginate=true&include[]=routeStops.store&include[]=routeStops.routeStopState&filter[status]=in_progress&include[]=routeIncidents`, { headers });
       const json = await res.json();
       const routes = json.data || [];
@@ -92,44 +92,61 @@ export default function useObservabilityDashboard() {
     });
   }, [activeVehicles, incidents]);
 
-  // Connect to websockets for the dynamically fetched route IDs
+  // Connect to websockets for the monitoring dashboard
   useEffect(() => {
-    if (activeRouteIds.length === 0) return;
+    const channelName = 'monitoring.dashboard';
+    const channel = echo.private(channelName);
 
-    const channels = [];
+    // Listen to vehicle positions
+    channel.listen('.vehicle.location.updated', (eventPayload) => {
+      console.log(`[WebSocket Dashboard] payload recibido:`, eventPayload);
 
-    activeRouteIds.forEach(routeId => {
-      const channelName = `routes.${routeId}`;
-      const channel = echo.private(channelName);
-      channels.push(channel);
+      const data = eventPayload.data?.attributes || eventPayload.attributes || eventPayload.data || eventPayload;
 
-      // Listen to vehicle positions
-      channel.listen('.vehicle.location.updated', (eventPayload) => {
-        const data = eventPayload.attributes || eventPayload;
+      let lat = data.lat || data.latitude;
+      let lng = data.lng || data.longitude;
 
-        if (data && data.lat && data.lng) {
-          setActiveVehicles(prev => ({
-            ...prev,
-            [routeId]: {
-              routeId,
-              routeName: data.route_name || `Ruta #${routeId}`,
-              latitude: data.lat,
-              longitude: data.lng,
-              speed: data.speed || 0,
-              lastUpdated: new Date().toISOString()
-            }
-          }));
-        }
-      });
+      // Importante: El backend BEBE incluir el route_id en el payload cuando se transmite al dashboard global
+      const routeId = data.route_id || data.routeId || eventPayload.route_id;
 
-      // Listen to incidents
-      channel.listen('.route.incident.reported', (eventPayload) => {
-        const incidentData = eventPayload.attributes ? eventPayload : { attributes: eventPayload }; // Fallback struct
-        setIncidents(prev => [incidentData, ...prev]);
-      });
+      if (data.coordinate && data.coordinate.coordinates) {
+        lng = data.coordinate.coordinates[0];
+        lat = data.coordinate.coordinates[1];
+      }
 
-      channel.listen('.route.signal.lost', () => {
-        // Mark vehicle as offline or remove it
+      if (lat !== undefined && lng !== undefined && routeId) {
+        setActiveVehicles(prev => ({
+          ...prev,
+          [routeId]: {
+            ...(prev[routeId] || {}), // Keep existing data if any
+            routeId,
+            routeName: data.route_name || prev[routeId]?.routeName || `Ruta #${routeId}`,
+            latitude: Number(lat),
+            longitude: Number(lng),
+            speed: data.speed || prev[routeId]?.speed || 0,
+            lastUpdated: new Date().toISOString(),
+            signalLost: false
+          }
+        }));
+      } else {
+        console.warn("[WebSocket Dashboard] No se pudieron extraer coordenadas (lat, lng) o no hay route_id en el payload:", data);
+      }
+    });
+
+    // Listen to incidents
+    channel.listen('.route.incident.reported', (eventPayload) => {
+      console.log(`[WebSocket Dashboard] Incidente reportado:`, eventPayload);
+      const incidentData = eventPayload.attributes ? eventPayload : { attributes: eventPayload }; // Fallback struct
+      setIncidents(prev => [incidentData, ...prev]);
+    });
+
+    // Listen to signal lost
+    channel.listen('.route.signal.lost', (eventPayload) => {
+      console.log(`[WebSocket Dashboard] Signal lost reportado:`, eventPayload);
+      const data = eventPayload.data?.attributes || eventPayload.attributes || eventPayload.data || eventPayload;
+      const routeId = data.route_id || data.routeId || eventPayload.route_id;
+
+      if (routeId) {
         setActiveVehicles(prev => {
           const copy = { ...prev };
           if (copy[routeId]) {
@@ -138,15 +155,13 @@ export default function useObservabilityDashboard() {
           }
           return copy;
         });
-      });
+      }
     });
 
     return () => {
-      channels.forEach(ch => {
-        echo.leave(ch.name);
-      });
+      echo.leave(channelName);
     };
-  }, [activeRouteIds]);
+  }, []); // Only subscribe once on mount
 
   return { activeVehicles, incidents, stats, isLoading, refetch: fetchActiveRoutes };
 }
