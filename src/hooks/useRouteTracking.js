@@ -18,34 +18,41 @@ export default function useRouteTracking(routeId) {
   });
   const [incidents, setIncidents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const User = 1;
   const fetchRouteData = useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
-      const headers = { 'Accept': 'application/json', 'X-User-Id': '2' };
+      const headers = { 'Accept': 'application/json', 'X-User-Id': User };
 
-      const [routeRes, typesRes] = await Promise.all([
+      const [routeRes, typesRes, activeRoutesRes] = await Promise.all([
         fetch(`${import.meta.env.VITE_API_URL}/api/v1/routes/${routeId}?include[]=vehicle&include[]=routeStops.store&include[]=routeStops.routeStopState`, { headers }),
-        fetch(`${import.meta.env.VITE_API_URL}/api/v1/incident-types`, { headers })
+        fetch(`${import.meta.env.VITE_API_URL}/api/v1/incident-types`, { headers }),
+        fetch(`${import.meta.env.VITE_API_URL}/api/v1/active-routes`, { headers })
       ]);
 
       const routeJson = await routeRes.json();
       const typesJson = await typesRes.json();
+      const activeRoutesJson = await activeRoutesRes.json();
 
       const route = routeJson.data;
       if (route) {
         setRouteData(route);
+        const activeRoute = (activeRoutesJson.data || []).find(r => String(r.attributes?.route_id) === String(routeId));
+        const isSignalLost = activeRoute?.attributes?.tracking?.is_signal_lost || false;
+
         setRouteInfo(prev => ({
           ...prev,
-          route_name: route.attributes.route_name || `Ruta #${routeId}`
+          route_name: route.attributes.route_name || activeRoute?.attributes?.route_name || `Ruta #${routeId}`,
+          isActive: !isSignalLost
         }));
 
         const stops = route.relationships?.route_stops || [];
         const sortedStops = [...stops].sort((a, b) => (a.attributes?.visit_order || 0) - (b.attributes?.visit_order || 0));
         setRouteStops(sortedStops);
 
-        // Actualización de posición inicial solo si no tenemos una
+        // Actualización de posición inicial sincronizada con active-routes
         if (showLoading) {
-          const lastLocation = route.attributes?.last_known_location;
+          const lastLocation = activeRoute?.attributes?.tracking?.last_known_location;
           if (lastLocation?.lat && lastLocation?.lng) {
             setVehiclePosition({ latitude: lastLocation.lat, longitude: lastLocation.lng });
           } else if (sortedStops.length > 0) {
@@ -139,8 +146,26 @@ export default function useRouteTracking(routeId) {
         console.warn(`⚠️ Aviso: ${typeInfo.name} reportado en ${locationMsg}.`);
       }
     });
+
+    // Suscripción al canal de notificaciones (Usuario 1 para Sandbox de Tripulación)
+    const userChannelName = 'App.Models.User.' + User;
+    const userChannel = echo.private(userChannelName);
+
+    userChannel.listen('.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', (eventPayload) => {
+      console.log(`[WebSocket Operador] Notificación recibida:`, eventPayload);
+      const payloadData = eventPayload.data || eventPayload;
+      const type = eventPayload.type || payloadData.type || '';
+
+      if (type === 'SIGNAL_LOST' || type.includes('SignalLostNotification')) {
+        setRouteInfo(prev => ({ ...prev, isActive: false }));
+      } else {
+        alert(`🔔 NOTIFICACIÓN DE CENTRAL 🔔\n${payloadData.title || type}: ${payloadData.message || 'Sin detalles'}`);
+      }
+    });
+
     return () => {
       echo.leave(channelName);
+      echo.leave(userChannelName);
     };
   }, [routeId, routeData]); // Se re-suscribe si routeData cambia para tener el nombre actualizado
 
@@ -152,7 +177,7 @@ export default function useRouteTracking(routeId) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-User-Id': '1'
+          'X-User-Id': User,
         },
         body: JSON.stringify({
           latitude: vehiclePosition.latitude,
@@ -181,7 +206,7 @@ export default function useRouteTracking(routeId) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-User-Id': '1'
+          'X-User-Id': User,
         },
         body: JSON.stringify({
           bags_amount: parseInt(bagsAmount, 10)
@@ -222,7 +247,7 @@ export default function useRouteTracking(routeId) {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-User-Id': '1'
+          'X-User-Id': User,
         },
         body: JSON.stringify({
           route_stop_id: stopId,

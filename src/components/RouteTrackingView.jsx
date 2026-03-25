@@ -1,73 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 import useRouteTracking from '../hooks/useRouteTracking';
 import RouteHeader from './RouteHeader';
 import RouteTimeline from './RouteTimeline';
 import RouteMap from './RouteMap';
-import * as turf from '@turf/turf';
 
 export default function RouteTrackingView() {
   //cambiar el useRouteTracking para cambiar el id de la ruta a visualizar
   const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, activeStop, incidents } = useRouteTracking(1);
-
-  // 1. ESTADO DE LA VISTA DEL MAPA
-  const [viewState, setViewState] = useState({
-    longitude: -74.0817,
-    latitude: 4.6897,
-    zoom: 14
-  });
-
-  // 2. BANDERA DE INTERACCIÓN: Para evitar que el GPS le quite el control al usuario
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
-
-  // 3. SEGUIMIENTO AUTOMÁTICO
-  useEffect(() => {
-    // Solo centramos el mapa automáticamente si el usuario NO lo está arrastrando
-    if (!isUserInteracting && vehiclePosition.longitude && vehiclePosition.latitude) {
-      setViewState(prev => ({
-        ...prev,
-        longitude: vehiclePosition.longitude,
-        latitude: vehiclePosition.latitude,
-      }));
-    }
-  }, [vehiclePosition, isUserInteracting]);
-
-  // ==========================================
-  // GENERADOR DE GEOCERCAS (PERÍMETROS REALES)
-  // ==========================================
-  const geofencesData = useMemo(() => {
-    const emptyGeoJSON = { type: 'FeatureCollection', features: [] };
-    if (!mapPoints || mapPoints.length === 0) return emptyGeoJSON;
-
-    // Filtramos los puntos que sí tienen coordenadas
-    const validPoints = mapPoints.filter(p => p.position?.lng && p.position?.lat);
-    if (validPoints.length === 0) return emptyGeoJSON;
-
-    const features = validPoints.map(point => {
-      // Turf.circle exige el radio en kilómetros. Si tu BD devuelve metros, dividimos por 1000.
-      const radiusInKm = (point.radius || 50) / 1000;
-
-      // Creamos el círculo exacto en la tierra
-      const circle = turf.circle([point.position.lng, point.position.lat], radiusInKm, {
-        units: 'kilometers',
-        steps: 64 // Qué tan redondo queremos el polígono
-      });
-
-      // Le inyectamos las propiedades (estado) para poder colorearlo dinámicamente
-      circle.properties = {
-        id: point.id,
-        state: point.state, // 'pending', 'in_progress', 'completed'
-        name: point.name
-      };
-
-      return circle;
-    });
-
-    const rawFeatureCollection = turf.featureCollection(features);
-    // We stringify and parse the turf output to ensure no reactive proxies or turf getters fail in the Web Worker
-    return JSON.parse(JSON.stringify(rawFeatureCollection));
-  }, [mapPoints]);
 
   if (isLoading && !routeInfo.route_name) {
     return (
@@ -84,14 +25,10 @@ export default function RouteTrackingView() {
       {/* SECCIÓN 1: MAPA EXTRUIDO */}
       <main className="flex-1 w-full relative z-0">
         <RouteMap
-          viewState={viewState}
-          onMove={evt => setViewState(evt.viewState)}
-          onDragStart={() => setIsUserInteracting(true)}
           mapPoints={mapPoints}
           vehiclePosition={vehiclePosition}
-          geofencesData={geofencesData}
-          isUserInteracting={isUserInteracting}
-          onRecenter={() => setIsUserInteracting(false)}
+          isVehicleActive={routeInfo.isActive}
+          routeName={routeInfo.route_name}
           incidents={incidents}
         />
 

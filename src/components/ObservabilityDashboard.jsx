@@ -1,20 +1,45 @@
-import React, { useState } from 'react';
-import RouteMap from './RouteMap';
+import React, { useState, useMemo } from 'react';
+import CriticalAlertsWidget from './dashboard/CriticalAlertsWidget';
+import IncidentFeedWidget from './dashboard/IncidentFeedWidget';
+import ActiveUnitsWidget from './dashboard/ActiveUnitsWidget';
+import DashboardMap from './dashboard/DashboardMap';
 import useObservabilityDashboard from '../hooks/useObservabilityDashboard';
 
 export default function ObservabilityDashboard() {
-  const { activeVehicles, incidents, stats, isLoading } = useObservabilityDashboard();
-  
-  const [viewState, setViewState] = useState({
-    longitude: -74.0817,
-    latitude: 4.6897,
-    zoom: 12
-  });
-  
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
+  const { formattedVehicles: vehicles, formattedIncidents, notifications, stats, isLoading, dismissNotification } = useObservabilityDashboard();
 
-  // Convert dictionary to array
-  const vehiclesList = Object.values(activeVehicles);
+  // Ubicación a enfocar en el mapa
+  const [focusLocation, setFocusLocation] = useState(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Toggle state para el Sidebar Izquierdo responsivo
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') return window.innerWidth >= 768;
+    return true;
+  });
+
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setIsSidebarOpen(true);
+      } else {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+
+
+  const handleVehicleClick = (v) => {
+    // Centrar mapa al hacer click en el sidebar
+    setFocusLocation({
+      longitude: v.longitude,
+      latitude: v.latitude,
+      zoom: 15
+    });
+  };
 
   if (isLoading) {
     return (
@@ -26,119 +51,151 @@ export default function ObservabilityDashboard() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-slate-900 text-slate-200 overflow-hidden font-sans">
-      
-      {/* SIDEBAR: Panel de Control */}
-      <aside className="w-96 bg-slate-800 border-r border-slate-700 flex flex-col z-10 shadow-2xl shrink-0">
-        <div className="p-6 border-b border-slate-700 bg-slate-900/50">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-            Centro de Control
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">Monitor de Operaciones</p>
-        </div>
+    <div className="flex h-screen w-full overflow-hidden bg-slate-100 font-sans">
 
-        {/* STATS GRID */}
-        <div className="p-6 grid grid-cols-2 gap-4">
-          <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600/50 flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold text-blue-400">{stats.totalActive}</span>
-            <span className="text-xs text-slate-400 uppercase mt-1 text-center">Rutas Activas</span>
-          </div>
-          <div className="bg-slate-700/50 p-4 rounded-xl border border-red-500/30 flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold text-red-500">{stats.criticalIncidents}</span>
-            <span className="text-xs text-slate-400 uppercase mt-1 text-center">Alertas Críticas</span>
-          </div>
-        </div>
+      {/* Overlay para móviles */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
 
-        {/* FEED DE INCIDENTES */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="px-6 py-3 border-y border-slate-700 bg-slate-800/80 flex items-center justify-between sticky top-0">
-            <h2 className="text-sm tracking-widest uppercase font-bold text-slate-300">Feed de Incidentes</h2>
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-            </span>
+      {/* LEFT SIDEBAR: Oscuro (bg-slate-950) con Animación Plegable */}
+      <aside
+        className={`bg-slate-950 border-r border-slate-900 flex flex-col shrink-0 text-slate-200 shadow-[5px_0_15px_rgba(0,0,0,0.5)] transition-all duration-300 ease-in-out overflow-hidden
+          fixed inset-y-0 left-0 z-30 md:relative md:flex
+          ${isSidebarOpen ? 'translate-x-0 w-80' : '-translate-x-full w-80 md:w-0 md:translate-x-0 md:border-r-0'}
+        `}
+      >
+        <div className="w-80 h-full flex flex-col shrink-0">
+          {/* Header App */}
+          <div className="p-6">
+            <h1 className="text-xl font-bold text-white tracking-wide">Centro de Control</h1>
+            <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest font-semibold opacity-80">
+              Monitor de Operaciones
+            </p>
           </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {incidents.length === 0 ? (
-              <div className="text-center text-slate-500 py-8 text-sm">
-                Sin incidentes reportados
-              </div>
-            ) : (
-              incidents.map((inc, i) => {
-                const isCritical = inc.relationships?.incident_type?.severity === 'CRITICAL' || inc.relationships?.incident_type?.severity === 'HIGH';
-                return (
-                  <div key={`feed-${inc.id || i}`} className={`p-4 rounded-lg border-l-4 shadow-sm bg-slate-700/30 ${isCritical ? 'border-l-red-500' : 'border-l-orange-500'}`}>
-                    <div className="flex justify-between items-start mb-1">
-                      <span className={`text-xs font-bold ${isCritical ? 'text-red-400' : 'text-orange-400'}`}>
-                        {inc.relationships?.incident_type?.name}
-                      </span>
-                      <span className="text-[10px] text-slate-500">{inc.attributes?.created_at_human || 'Ahora'}</span>
-                    </div>
-                    <p className="text-sm text-slate-200 mb-2">{inc.attributes?.description}</p>
-                    {inc.relationships?.store && (
-                      <div className="text-[11px] text-slate-400 bg-slate-800/50 px-2 py-1 rounded inline-flex items-center gap-1 border border-slate-700">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                        {inc.relationships.store.name}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+
+          {/* Stats Grid */}
+          <div className="px-6 flex flex-col gap-4 mb-6">
+            {/* Rutas Activas */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center shadow-sm">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Rutas Activas</span>
+              <span className="text-4xl font-black text-slate-800">{stats.totalActive}</span>
+            </div>
+
+            {/* Alertas Críticas (Dinámica) */}
+            <CriticalAlertsWidget count={stats.criticalIncidents} />
           </div>
+
+          {/* Feed de Incidentes */}
+          <IncidentFeedWidget incidents={formattedIncidents} onDismiss={dismissNotification} />
         </div>
       </aside>
 
-      {/* MAP AREA */}
-      <main className="flex-1 relative">
-         <RouteMap
-            viewState={viewState}
-            onMove={evt => setViewState(evt.viewState)}
-            onDragStart={() => setIsUserInteracting(true)}
-            activeVehicles={vehiclesList}
-            isUserInteracting={isUserInteracting}
-            onRecenter={() => setIsUserInteracting(false)}
-            incidents={incidents} // Para que también se dibujen en el mapa grande
-         />
+      {/* MAP AREA: Claro y central */}
+      <main className="flex-1 relative bg-slate-200">
 
-         {/* Overlay Listado Vehiculos Flotante */}
-         <div className="absolute top-6 right-6 z-10 w-72 bg-slate-900/90 backdrop-blur border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/50">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Unidades Activas</h3>
-            </div>
-            <div className="max-h-60 overflow-y-auto">
-              {vehiclesList.length === 0 && (
-                <div className="px-4 py-6 text-center text-xs text-slate-500">Buscando señal...</div>
+        {/* Toggle Sidebar Button / Hamburger FAB */}
+        <button
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className={`absolute top-6 z-40 bg-slate-900 hover:bg-slate-800 text-white p-2.5 rounded-xl shadow-lg border-2 border-slate-700/50 backdrop-blur transition-all active:scale-95 group
+            ${isSidebarOpen ? 'left-[calc(20rem+1rem)] md:left-6' : 'left-6'}
+          `}
+          title={isSidebarOpen ? "Ocultar panel lateral" : "Mostrar panel lateral"}
+        >
+          {!isSidebarOpen ? (
+            <svg className="w-5 h-5 text-slate-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 transition-transform duration-300 text-slate-300 group-hover:text-white md:rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            </svg>
+          )}
+        </button>
+
+        {/* Campana de Notificaciones */}
+        <div className="absolute top-6 right-6 z-50">
+          <div className="relative">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="bg-slate-900 hover:bg-slate-800 text-white p-3 rounded-full shadow-lg border-2 border-slate-700/50 backdrop-blur transition-all active:scale-95 group relative"
+            >
+              <svg className="w-5 h-5 text-slate-300 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              {notifications?.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center">
+                  <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-[10px] font-bold items-center justify-center border-2 border-slate-900">
+                    {notifications.length}
+                  </span>
+                </span>
               )}
-              {vehiclesList.map(v => (
-                <div key={v.routeId} className="px-4 py-3 border-b border-slate-700/50 flex justify-between items-center hover:bg-slate-800/50 cursor-pointer transition-colors"
-                  onClick={() => {
-                    setViewState(prev => ({ ...prev, latitude: v.latitude, longitude: v.longitude, zoom: 16 }));
-                    setIsUserInteracting(false);
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <div className="absolute right-0 mt-3 w-80 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-down origin-top-right">
+                <div className="p-4 border-b border-slate-800 bg-slate-950/80 flex justify-between items-center">
+                  <h3 className="text-white font-bold">Notificaciones</h3>
+                  <span className="text-xs text-slate-400 font-medium">{notifications?.length || 0} nuevas</span>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                  {!notifications?.length ? (
+                    <div className="p-6 text-center text-slate-500 text-sm">
+                      No hay notificaciones
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-white tracking-wide">{v.routeName}</p>
-                      <p className="text-[10px] text-slate-400">{v.speed} km/h</p>
-                    </div>
-                  </div>
-                  {v.signalLost ? (
-                    <span className="flex h-2 w-2 rounded-full bg-slate-500" title="Señal perdida"></span>
                   ) : (
-                    <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse" title="Transmitiendo"></span>
+                    notifications.map((notif) => {
+                      const data = notif.attributes?.data || {};
+                      const isCritical = data.severity === 'CRITICAL';
+                      return (
+                        <div key={notif.id} className="relative group p-3 hover:bg-slate-800/60 rounded-lg mb-1 transition-colors border border-transparent hover:border-slate-700/50">
+                          <button
+                            onClick={() => dismissNotification(notif.id)}
+                            className="absolute top-2 right-2 text-slate-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-slate-800 rounded-full"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                          </button>
+
+                          <div className="pr-6">
+                            <h4 className={`text-sm font-bold mb-1 ${isCritical ? 'text-red-400' : 'text-orange-400'}`}>
+                              {data.title || 'Alerta'}
+                            </h4>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                              {data.message || 'Sin detalles'}
+                            </p>
+                            <span className="text-[10px] text-slate-500 mt-2 block font-medium">
+                              {notif.attributes?.created_at_human || 'Ahora'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
-              ))}
-            </div>
-         </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* El mapa ocupa todo el fondo */}
+        <DashboardMap
+          focusLocation={focusLocation}
+          vehicles={vehicles}
+          routesPolylines
+        />
+
+        {/* Floating Right Sidebar: Unidades Activas */}
+        <ActiveUnitsWidget
+          vehicles={vehicles}
+          onVehicleClick={handleVehicleClick}
+        />
+
       </main>
     </div>
   );
