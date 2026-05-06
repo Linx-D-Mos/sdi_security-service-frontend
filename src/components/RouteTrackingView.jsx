@@ -8,7 +8,7 @@ import RouteMap from './RouteMap';
 
 export default function RouteTrackingView() {
   //cambiar el useRouteTracking para cambiar el id de la ruta a visualizar
-  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, activeStop, incidents } = useRouteTracking(1);
+  const { vehiclePosition, routeInfo, routeStops, mapPoints, isLoading, handleCheckIn, handleCheckOut, handleReportIncident, activeStop, incidents } = useRouteTracking(2);
 
   if (isLoading && !routeInfo.route_name) {
     return (

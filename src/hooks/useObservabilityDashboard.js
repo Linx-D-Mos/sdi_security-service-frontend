@@ -13,11 +13,12 @@ export default function useObservabilityDashboard() {
   });
 
   const vehicleBufferRef = useRef({});
+  const User = 12;
   // Fetch initial state via Promise.all (State Hydration)
   const fetchInitialState = useCallback(async () => {
     setIsLoading(true);
     try {
-      const headers = { 'Accept': 'application/json', 'X-User-Id': '1' };
+      const headers = { 'Accept': 'application/json', 'X-User-Id': User };
 
       const [routesRes, notificationsRes] = await Promise.all([
         fetch(`${import.meta.env.VITE_API_URL}/api/v1/active-routes`, { headers }),
@@ -146,13 +147,10 @@ export default function useObservabilityDashboard() {
       // forzamos la actualización del state saltándonos el throttle:
       setActiveVehicles({ ...vehicleBufferRef.current });
     });
-    // Listen to Notifications (User Private Channel)
-    // Asumiendo ID de usuario logueado = 1 para el prototipo
-    const userChannelName = 'App.Models.User.1';
-    const userChannel = echo.private(userChannelName);
-
-    userChannel.listen('.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', (eventPayload) => {
-      console.log(`[WebSocket Dashboard] Notificación Broadcast recibida:`, eventPayload);
+    // 3. 🚨 NUEVO: Escuchar Notificaciones en el Canal Global
+    // Como la Ruta es el Notifiable, Laravel manda la BroadcastNotificationCreated a este canal
+    globalChannel.listen('.Illuminate\\Notifications\\Events\\BroadcastNotificationCreated', (eventPayload) => {
+      console.log(`[WebSocket Dashboard] Notificación Broadcast recibida en Canal Global:`, eventPayload);
 
       const type = eventPayload.type;
       const dataPayload = eventPayload.data || eventPayload;
@@ -162,7 +160,7 @@ export default function useObservabilityDashboard() {
         attributes: {
           type: type || dataPayload.type || 'Notification',
           data: dataPayload,
-          created_at_human: 'Ahora' // Fallback
+          created_at_human: 'Ahora'
         }
       };
 
@@ -172,7 +170,6 @@ export default function useObservabilityDashboard() {
 
       const routeId = dataPayload.route_id || dataPayload.routeId;
 
-      // Inyectar al principio de la lista y des-duplicar si es SIGNAL_LOST
       setNotifications(prev => {
         let filtered = prev;
         if (isSignalLost && routeId) {
@@ -181,7 +178,6 @@ export default function useObservabilityDashboard() {
             const nIsSignalLost = nType === 'SIGNAL_LOST' || nType.includes('SignalLostNotification');
             const nRouteId = n.attributes?.data?.route_id || n.attributes?.data?.routeId;
 
-            // Si es una alerta de pérdida de señal para la misma ruta, la descartamos
             if (nIsSignalLost && nRouteId === routeId) {
               return false;
             }
@@ -191,10 +187,8 @@ export default function useObservabilityDashboard() {
         return [newNotification, ...filtered];
       });
     });
-
     return () => {
       echo.leave(globalChannelName);
-      echo.leave(userChannelName);
       clearInterval(throttleInterval);
     };
   }, []); // Only subscribe once on mount

@@ -39,7 +39,7 @@ const echo = new Echo({
                         headers: {
                             'Content-Type': 'application/json',
                             'Accept': 'application/json',
-                            'X-User-Id': 1,
+                            'X-User-Id': 12,
 
                         },
                         body: JSON.stringify({
